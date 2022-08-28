@@ -1,0 +1,3 @@
+[submodule "spreadsheet/antlr4_runtime/runtime/thirdparty/utfcpp"]
+	path = spreadsheet/antlr4_runtime/runtime/thirdparty/utfcpp
+	url = https://github.com/nemtrif/utfcpp

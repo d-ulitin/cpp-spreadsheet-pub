@@ -1,14 +1,20 @@
 #include "FormulaAST.h"
+#include "sheet.h"
+#include "common.h"
 
 #include "FormulaBaseListener.h"
 #include "FormulaLexer.h"
 #include "FormulaParser.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <cmath>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 
 namespace ASTImpl {
 
@@ -72,7 +78,7 @@ public:
     virtual ~Expr() = default;
     virtual void Print(std::ostream& out) const = 0;
     virtual void DoPrintFormula(std::ostream& out, ExprPrecedence precedence) const = 0;
-    virtual double Evaluate(/*добавьте сюда нужные аргументы*/ args) const = 0;
+    virtual double Evaluate(const SheetInterface& sheet) const = 0;
 
     // higher is tighter
     virtual ExprPrecedence GetPrecedence() const = 0;
@@ -142,8 +148,31 @@ public:
         }
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/) const override {
-			// Скопируйте ваше решение из предыдущих уроков.
+// Реализуйте метод Evaluate() для бинарных операций.
+// При делении на 0 выбрасывайте ошибку вычисления FormulaError
+    double Evaluate(const SheetInterface& sheet) const override {
+        double result = NAN;
+        switch(type_) {
+            case Add:
+                result = lhs_->Evaluate(sheet) + rhs_->Evaluate(sheet);
+                break;
+            case Subtract:
+                result = lhs_->Evaluate(sheet) - rhs_->Evaluate(sheet);
+                break;
+            case Multiply:
+                result = lhs_->Evaluate(sheet) * rhs_->Evaluate(sheet);
+                break;
+            case Divide: {
+                result = lhs_->Evaluate(sheet) / rhs_->Evaluate(sheet);
+                break;
+            }
+            default:
+                assert(false);
+                std::terminate();
+        }
+        if (!std::isfinite(result))
+            throw FormulaError(FormulaError::Category::Div0);
+        return result;
     }
 
 private:
@@ -180,8 +209,16 @@ public:
         return EP_UNARY;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
-        // Скопируйте ваше решение из предыдущих уроков.
+    double Evaluate(const SheetInterface& sheet) const override {
+        switch (type_) {
+            case UnaryPlus:
+                return operand_->Evaluate(sheet);
+            case UnaryMinus:
+                return -operand_->Evaluate(sheet);
+            default:
+                assert(false);
+                std::terminate();
+        }
     }
 
 private:
@@ -211,8 +248,52 @@ public:
         return EP_ATOM;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
-        // реализуйте метод.
+    struct CellDoubleValueVisitor {
+
+        double operator()(const std::string& value) {
+            // Если формула содержит индекс пустой ячейки, предполагаем, что значение пустой ячейки — 0.
+            if (value.empty()) {
+                return 0;
+            }
+            auto nonspace_iter = std::find_if(value.begin(), value.end(),
+                [](char c) {return !std::isspace(c);});
+            if (nonspace_iter == value.end()) {
+                return 0;
+            }
+            // try parse number
+            size_t pos = 0;
+            try {
+                double number = std::stod(value, &pos);
+                auto skip_space_iter = std::find_if(value.begin() + pos, value.end(),
+                    [](char c) {return !std::isspace(c);});
+                if (skip_space_iter == value.end() && std::isfinite(number)) {
+                    return number;
+                }
+            } catch (const std::invalid_argument&) {
+                // no conversion could be performed
+            } catch (const std::out_of_range&) {
+                // converted value would fall out of the range of the result type
+            }
+            throw FormulaError(FormulaError::Category::Value);
+        }
+
+        double operator()(double value) {
+            return value;
+        }
+
+        double operator()(FormulaError value) {
+            throw value;
+        }
+    };
+
+    double Evaluate(const SheetInterface& sheet) const override {
+        const CellInterface *ref_cell = sheet.GetCell(*cell_);
+        if (!ref_cell) {
+            // Если формула содержит индекс пустой ячейки, предполагаем, что значение пустой ячейки — 0.
+            return 0;
+        }
+        auto value = ref_cell->GetValue();
+        return std::visit(CellDoubleValueVisitor{}, value);
     }
 
 private:
@@ -237,7 +318,7 @@ public:
         return EP_ATOM;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
+    double Evaluate(const SheetInterface& sheet) const override {
         return value_;
     }
 
@@ -391,8 +472,8 @@ void FormulaAST::PrintFormula(std::ostream& out) const {
     root_expr_->PrintFormula(out, ASTImpl::EP_ATOM);
 }
 
-double FormulaAST::Execute(/*добавьте нужные аргументы*/ args) const {
-    return root_expr_->Evaluate(/*добавьте нужные аргументы*/ args);
+double FormulaAST::Execute(const SheetInterface& sheet) const {
+    return root_expr_->Evaluate(sheet);
 }
 
 FormulaAST::FormulaAST(std::unique_ptr<ASTImpl::Expr> root_expr, std::forward_list<Position> cells)

@@ -3,34 +3,49 @@
 #include "common.h"
 #include "formula.h"
 
-#include <functional>
-#include <unordered_set>
+#include <variant>
+#include <optional>
+#include <string>
+#include <memory>
 
 class Sheet;
 
 class Cell : public CellInterface {
-public:
-    Cell(Sheet& sheet);
+  public:
+    Cell(Sheet &sheet);
     ~Cell();
 
     void Set(std::string text);
     void Clear();
 
+    // CellInterface implementation
     Value GetValue() const override;
     std::string GetText() const override;
     std::vector<Position> GetReferencedCells() const override;
 
-    bool IsReferenced() const;
+    void InvalidateCache() const;
 
-private:
-    class Impl;
-    class EmptyImpl;
-    class TextImpl;
-    class FormulaImpl;
+  private:
+    struct FormulaValueImpl {
+        std::unique_ptr<FormulaInterface> formula;
+        const SheetInterface *sheet;
+    };
 
-    std::unique_ptr<Impl> impl_;
+    using ValueImpl = std::variant<std::monostate, std::string, FormulaValueImpl>;
 
-    // Добавьте поля и методы для связи с таблицей, проверки циклических 
-    // зависимостей, графа зависимостей и т. д.
+    SheetInterface& sheet_;
+    ValueImpl value_;
 
+    // Cache
+
+    // Caching CellInterface::Value is simple. It can be done with respect to
+    // single responsibility principle (SOLID). But it can result to duplicating every
+    // string containing in cell.
+    // So cache _only formula results_ and realize it inside Cell class.
+    // Use variant to make it possible to add other chached types if needed.
+    // monostate means no cached value
+    using CachedValue = std::variant<std::monostate, FormulaInterface::Value>;
+
+    // Caching keeps logical constantness
+    mutable CachedValue cache_;
 };

@@ -2,6 +2,7 @@
 
 #include "FormulaLexer.h"
 #include "common.h"
+#include "sheet.h"
 
 #include <forward_list>
 #include <functional>
@@ -23,7 +24,7 @@ public:
     FormulaAST& operator=(FormulaAST&&) = default;
     ~FormulaAST();
 
-    double Execute(/*добавьте нужные аргументы*/ args) const;
+    double Execute(const SheetInterface& sheet) const;
     void PrintCells(std::ostream& out) const;
     void Print(std::ostream& out) const;
     void PrintFormula(std::ostream& out) const;
